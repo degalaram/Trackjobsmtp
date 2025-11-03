@@ -13,6 +13,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.67.0",
     "@emailjs/browser": "^4.4.1",
+    "@getbrevo/brevo": "^3.0.1",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@neondatabase/serverless": "^0.10.4",
@@ -82,7 +83,6 @@
     "react-icons": "^5.4.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "^2.15.2",
-    "resend": "^6.4.0",
     "session-file-store": "^1.5.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss": "^3.4.17",
