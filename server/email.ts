@@ -201,29 +201,38 @@ export async function sendOTPEmail(
   otp: string,
   subject: string = 'Your OTP Code'
 ): Promise<boolean> {
+  const hasGmailAppPassword = !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
   const hasGmailOAuth = !!(process.env.GMAIL_USER && process.env.GMAIL_CLIENT_ID &&
                           process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN);
 
-  if (!hasGmailOAuth) {
-    console.error('❌ Failed to send OTP: Gmail OAuth2 not configured');
-    console.error('Please configure these environment variables:');
-    console.error('  GMAIL_USER - Your Gmail address');
-    console.error('  GMAIL_CLIENT_ID - OAuth2 Client ID');
-    console.error('  GMAIL_CLIENT_SECRET - OAuth2 Client Secret');
-    console.error('  GMAIL_REFRESH_TOKEN - OAuth2 Refresh Token');
-    console.error('\n🔧 To regenerate refresh token:');
-    console.error('  1. Visit: https://developers.google.com/oauthplayground');
-    console.error('  2. Click settings (gear icon) → "Use your own OAuth credentials"');
-    console.error('  3. Enter your GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET');
-    console.error('  4. Select "Gmail API v1" → "https://mail.google.com/"');
-    console.error('  5. Click "Authorize APIs" and sign in');
-    console.error('  6. Click "Exchange authorization code for tokens"');
-    console.error('  7. Copy the "Refresh token" and update GMAIL_REFRESH_TOKEN in Secrets');
+  if (hasGmailAppPassword) {
+    console.log(`Attempting to send OTP to ${to} using Gmail App Password`);
+    const success = await sendViaGmailAppPassword(to, username, otp, subject);
+    if (success) return true;
+    
+    if (hasGmailOAuth) {
+      console.log('Gmail App Password failed, trying OAuth2 as fallback...');
+      return await sendViaGmailOAuth(to, username, otp, subject);
+    }
     return false;
   }
 
-  console.log(`Attempting to send OTP to ${to} using Gmail OAuth2`);
-  return await sendViaGmailOAuth(to, username, otp, subject);
+  if (hasGmailOAuth) {
+    console.log(`Attempting to send OTP to ${to} using Gmail OAuth2`);
+    return await sendViaGmailOAuth(to, username, otp, subject);
+  }
+
+  console.error('❌ Failed to send OTP: No Gmail configuration found');
+  console.error('Please configure ONE of these options:');
+  console.error('\nOption 1 - Gmail App Password (RECOMMENDED - Simple):');
+  console.error('  GMAIL_USER=your-email@gmail.com');
+  console.error('  GMAIL_APP_PASSWORD=your-16-char-app-password');
+  console.error('\nOption 2 - Gmail OAuth2 (Complex):');
+  console.error('  GMAIL_USER=your-email@gmail.com');
+  console.error('  GMAIL_CLIENT_ID=your-client-id');
+  console.error('  GMAIL_CLIENT_SECRET=your-client-secret');
+  console.error('  GMAIL_REFRESH_TOKEN=your-refresh-token');
+  return false;
 }
 
 export async function verifyEmailConfig(): Promise<void> {
