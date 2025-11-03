@@ -1,4 +1,37 @@
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
+
+async function sendViaResend(
+  to: string,
+  username: string,
+  otp: string,
+  subject: string
+): Promise<boolean> {
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    
+    console.log(`Sending OTP via Resend to ${to}...`);
+    
+    const { data, error } = await resend.emails.send({
+      from: 'Daily Tracker <onboarding@resend.dev>',
+      to: [to],
+      subject,
+      html: getEmailHTML(username, otp),
+    });
+
+    if (error) {
+      console.error('❌ Resend send failed:', error);
+      return false;
+    }
+
+    console.log(`✅ OTP email sent successfully via Resend to ${to}`);
+    console.log(`Message ID: ${data?.id}`);
+    return true;
+  } catch (error: any) {
+    console.error(`❌ Resend error:`, error.message);
+    return false;
+  }
+}
 
 async function sendViaGmailOAuth(
   to: string,
@@ -201,10 +234,20 @@ export async function sendOTPEmail(
   otp: string,
   subject: string = 'Your OTP Code'
 ): Promise<boolean> {
+  const hasResend = !!process.env.RESEND_API_KEY;
   const hasGmailAppPassword = !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
   const hasGmailOAuth = !!(process.env.GMAIL_USER && process.env.GMAIL_CLIENT_ID &&
                           process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN);
 
+  // Priority 1: Resend (works reliably on all platforms)
+  if (hasResend) {
+    console.log(`Attempting to send OTP to ${to} using Resend`);
+    const success = await sendViaResend(to, username, otp, subject);
+    if (success) return true;
+    console.log('Resend failed, trying Gmail fallback...');
+  }
+
+  // Priority 2: Gmail App Password
   if (hasGmailAppPassword) {
     console.log(`Attempting to send OTP to ${to} using Gmail App Password`);
     const success = await sendViaGmailAppPassword(to, username, otp, subject);
@@ -217,39 +260,34 @@ export async function sendOTPEmail(
     return false;
   }
 
+  // Priority 3: Gmail OAuth2
   if (hasGmailOAuth) {
     console.log(`Attempting to send OTP to ${to} using Gmail OAuth2`);
     return await sendViaGmailOAuth(to, username, otp, subject);
   }
 
-  console.error('❌ Failed to send OTP: No Gmail configuration found');
+  console.error('❌ Failed to send OTP: No email provider configured');
   console.error('Please configure ONE of these options:');
-  console.error('\nOption 1 - Gmail App Password (RECOMMENDED - Simple):');
+  console.error('\nOption 1 - Resend (RECOMMENDED for Render):');
+  console.error('  RESEND_API_KEY=re_xxxxxxxxxxxxx');
+  console.error('\nOption 2 - Gmail App Password (works locally):');
   console.error('  GMAIL_USER=your-email@gmail.com');
   console.error('  GMAIL_APP_PASSWORD=your-16-char-app-password');
-  console.error('\nOption 2 - Gmail OAuth2 (Complex):');
-  console.error('  GMAIL_USER=your-email@gmail.com');
-  console.error('  GMAIL_CLIENT_ID=your-client-id');
-  console.error('  GMAIL_CLIENT_SECRET=your-client-secret');
-  console.error('  GMAIL_REFRESH_TOKEN=your-refresh-token');
   return false;
 }
 
 export async function verifyEmailConfig(): Promise<void> {
+  const hasResend = !!process.env.RESEND_API_KEY;
   const hasGmailOAuth = !!(process.env.GMAIL_USER && process.env.GMAIL_CLIENT_ID &&
                           process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN);
-  
   const hasGmailAppPassword = !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
 
-  if (!hasGmailOAuth && !hasGmailAppPassword) {
+  if (!hasResend && !hasGmailOAuth && !hasGmailAppPassword) {
     console.warn('\n⚠️  No email configuration found - OTP emails will fail');
-    console.warn('Configure ONE of these options on Render:');
-    console.warn('\nOption 1 - Gmail OAuth2:');
-    console.warn('  GMAIL_USER=your-email@gmail.com');
-    console.warn('  GMAIL_CLIENT_ID=your-client-id');
-    console.warn('  GMAIL_CLIENT_SECRET=your-client-secret');
-    console.warn('  GMAIL_REFRESH_TOKEN=your-refresh-token');
-    console.warn('\nOption 2 - Gmail App Password (Recommended - Simpler):');
+    console.warn('Configure ONE of these options:');
+    console.warn('\nOption 1 - Resend (Recommended for Render):');
+    console.warn('  RESEND_API_KEY=re_xxxxxxxxxxxxx');
+    console.warn('\nOption 2 - Gmail App Password (works locally):');
     console.warn('  GMAIL_USER=your-email@gmail.com');
     console.warn('  GMAIL_APP_PASSWORD=your-16-char-app-password\n');
     return;
@@ -257,19 +295,24 @@ export async function verifyEmailConfig(): Promise<void> {
 
   console.log('\n=== Email Configuration Status ===');
   
-  if (hasGmailOAuth && hasGmailAppPassword) {
-    console.log('✅ Email provider: Gmail OAuth2 (primary) + App Password (fallback)');
+  if (hasResend) {
+    console.log('✅ Email provider: Resend (primary)');
+    console.log('🔑 API Key: Configured');
+    if (hasGmailAppPassword || hasGmailOAuth) {
+      console.log('📧 Gmail: Configured as fallback');
+    }
+  } else if (hasGmailOAuth && hasGmailAppPassword) {
+    console.log('✅ Email provider: Gmail App Password (primary) + OAuth2 (fallback)');
     console.log('📧 Sender email:', process.env.GMAIL_USER);
-    console.log('🔑 OAuth2 Client ID:', process.env.GMAIL_CLIENT_ID?.substring(0, 20) + '...');
-    console.log('🔑 App Password: Configured as fallback');
+    console.log('⚠️  Note: Gmail SMTP may timeout on Render - consider using Resend');
+  } else if (hasGmailAppPassword) {
+    console.log('✅ Email provider: Gmail App Password');
+    console.log('📧 Sender email:', process.env.GMAIL_USER);
+    console.log('⚠️  Note: Gmail SMTP may timeout on Render - consider using Resend');
   } else if (hasGmailOAuth) {
     console.log('✅ Email provider: Gmail OAuth2');
     console.log('📧 Sender email:', process.env.GMAIL_USER);
-    console.log('🔑 OAuth2 Client ID:', process.env.GMAIL_CLIENT_ID?.substring(0, 20) + '...');
-  } else {
-    console.log('✅ Email provider: Gmail App Password');
-    console.log('📧 Sender email:', process.env.GMAIL_USER);
-    console.log('🔑 App Password: Configured');
+    console.log('⚠️  Note: Gmail SMTP may timeout on Render - consider using Resend');
   }
   
   console.log('⚠️  Skipping connection test to speed up startup');
